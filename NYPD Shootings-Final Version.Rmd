@@ -1,0 +1,333 @@
+---
+title: "Patterns in NYC Shooting Incidents: An Analysis of Location and Time"
+author: "Katrina Storey"
+date: '`r Sys.Date()`'
+output: 
+  prettydoc::html_pretty:
+    highlight: cayman
+    theme: github
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T, message=F, warning=F, error=F, 
+                      comment=NA, cache=T, R.options=list(width=220), 
+                      fig.align='center', out.width='75%', fig.asp=.75)
+
+```
+This document presents an analysis of the "NYPD Shooting Incident Data (Historic)" dataset. The dataset contains information about shooting reported by the New York City Police Department (NYPD)between 2006-2022.
+
+# Step 0: Import Libraries
+
+In this project I will be utilizing the following packages:
+
+```{r load packages}
+
+# Build Library
+library(dplyr)
+library(knitr)
+library(forcats)
+library(lubridate)
+library(ggplot2)
+library(tidyverse)
+library(viridis)
+```
+
+# Step 1: Import Data
+
+## NYPD Shooting Incident Data (Historic)
+
+This dataset is a breakdown of every shooting incident that occurred in New York City, New York (NYC),between 2006 and the end of the previous calendar year (2022). This data is manually extracted every quarter and reviewed by the Office of Management Analysis and Planning before being posted on the NYPD website. Each record represents a single shooting incident in NYC, and includes information about the event, the location, and time of occurrence. In addition, information related to suspect and victim demographics is also included.
+
+```{r import dataset}
+
+#Import dataset
+rawIncidents <- read.csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD", stringsAsFactors = TRUE)
+
+#Glimpse dataset
+glimpse(rawIncidents)
+```
+# Step 2: Tidy and Transform Data
+ 
+For this specific project, there are a few columns that I will not be utilizing, and I will start the data cleaning process by removing them:  
+
+**VIC_RACE**, **VIC_SEX**, **VIC_AGE_GROUP**, **PERP_RACE**, **PERP_SEX**, **PERP_AGE_GROUP**, **JURISDICTION_CODE**, **Longitude**, **Latitude**, **X_COORD_CD**, **Y_COORD_CD**, and **Lon_Lat**.
+
+```{r clean data, echo= FALSE}
+
+# Remove columns
+cleanIncidents <- rawIncidents %>%
+  select(-c(VIC_RACE, VIC_SEX, VIC_AGE_GROUP, PERP_RACE, PERP_SEX, PERP_AGE_GROUP, JURISDICTION_CODE, X_COORD_CD,Y_COORD_CD,Latitude,Longitude,Lon_Lat))
+```
+
+When the dataset was imported, I set the argument stringsAsFactors to TRUE, but there are a few columns we need to convert:  
+
+**INCIDENT_KEY** needs to be a character  
+**PRECINCT** needs to be a factor
+
+
+```{r convert datatypes}
+
+# Convert datatypes
+
+# INCIDENT_KEY as a character 
+cleanIncidents$INCIDENT_KEY  = as.character(cleanIncidents$INCIDENT_KEY)
+# PRECINCT  as a factor
+cleanIncidents$PRECINCT = as.factor(cleanIncidents$PRECINCT)
+```
+
+
+Next, we are going to check the categories in each column for errors, unknown types, and out-of-range data:
+
+```{r check factor levels for errors}
+
+#Check factor levels for errors
+
+levels(cleanIncidents$BORO)
+levels(cleanIncidents$PRECINCT)
+levels(cleanIncidents$LOC_OF_OCCUR_DESC)
+levels(cleanIncidents$LOC_CLASSFCTN_DESC)
+levels(cleanIncidents$LOCATION_DESC)
+levels(cleanIncidents$STATISTICAL_MURDER_FLAG)
+```
+
+There are three columns containing the values **""**, **"(null)"**. For the purpose of handling missing data, I will collapse these values and assign them to the category "Unknown":  
+
+**LOC_OF_OCCUR_DESC**, **LOC_CLASSFCTN_DESC**, **LOCATION_DESC**
+
+```{r collapse to unknown}
+
+#Collapse "", "(null)" categories into "Unknown"
+collapsedIncidents <- cleanIncidents %>%
+  mutate(LOC_OF_OCCUR_DESC = fct_collapse(LOC_OF_OCCUR_DESC, Unknown = ""),
+         LOC_CLASSFCTN_DESC = fct_collapse(LOC_CLASSFCTN_DESC, Unknown = ""),
+         LOCATION_DESC = fct_collapse(LOCATION_DESC, Unknown = c("","(null)")))
+```
+
+**Missing Data**  
+
+There are several factors that can contribute to the presence of missing or unknown data regarding the location of shooting incidents. These include the unavailability or non-reporting of specific location details or classifications for certain incidents. Additionally, incomplete incident reports or limited information provided by witnesses might contribute to this issue. The collection of data can be a complex process, often constrained by time and resource limitations, which may prevent the collection of detailed information for all incidents. It is worth noting that the data spans a period of approximately 17 years, during which time data collection practices may have changed, resulting in inconsistencies in recording location or classification information.
+
+# Step 3: Analysis - Visualizations and Modeling
+
+## Research Questions
+
+1.  **Boroughs**  
+  Which boroughs have the most shootings overall?
+  Which boroughs have the most murders relatively?
+  
+2.  **Locations**  
+  How complete is the categorical location data?  
+  
+3.  **Time and Day**  
+  When are shootings most likely to occur?
+
+## Boroughs  
+
+New York City is organized into five distinct governmental districts known as boroughs: the Bronx, Brooklyn, Manhattan, Queens, and Staten Island. This form of local governance is quite exceptional, being specific to New York City and with limited counterparts in the States. However, these counterparts do not possess the same county-like governance structure as the boroughs in New York City.
+
+**Shootings by Borough**
+
+```{r shootings by borough}
+
+#Group shootings by borough
+shootings <- collapsedIncidents %>%
+  group_by(BORO) %>%
+  count()
+
+#Plot Bar Graph
+ggplot(shootings, aes(x = BORO, y = n)) +
+  geom_col(fill = viridis(5)) +
+  labs(title = "Overall Shootings by Borough",
+       x = "Borough",
+       y = "Number of Shootings") +
+  theme_classic()
+```
+
+**Relative Murders**
+
+```{r Most Murders Viz}
+
+# Group pecentage of shootings resulting in murder by borough
+murders <- collapsedIncidents %>%
+    group_by(BORO, STATISTICAL_MURDER_FLAG) %>%
+    count()
+
+# Plot Bar Graph
+ggplot(murders, aes(x = BORO, y = n, fill = as.factor(STATISTICAL_MURDER_FLAG))) +   
+  geom_col(position = "fill") +
+  labs(title = "Relative Murders by Boroughs",
+       x = "Borough",
+       y = "Percentage of Murders by Shootings",
+       fill = "Shooting Results in Murder") +
+  scale_fill_viridis(discrete = TRUE) +
+  theme_classic()
+```
+
+###  General Observations
+
+While analyzing the above graphs, it is apparent that certain boroughs exhibit a higher number of shootings compared to others. It is also worth noting that the number of murders resulting from these shootings display a similarly proportional relationship. Thus in instances where a borough experiences a higher murder rate, it is primarily due to a greater frequency of shootings, rather than an increased fatality rate associated with those shootings in that specific borough.  
+
+###   Follow-up questions  
+
+Do certain boroughs have proportionally more shootings than others? What would the graphs look like if we were to pair this data with corresponding population data in order to look at shootings per capita?
+
+How does population density impact the social dynamics of violence? If we were to compare NYC with a less densely population city would shooting incidents be proportional?
+
+##  Location Data 
+
+There are three distinct categories of descriptive location data that haven been gathered, each if which holds potential for helping our understanding of the role of location in shooting confrontations. As demonstrated by the graphical representations below, however, the investigation of such patterns would only be only feasible with complete and accurate data collection methods.  
+
+**Original Data Collection**  
+
+The graph below illustrates the descriptive location data collected through the times pan of the dataset. It is worth noting that a significant proportion of the data (approximately 58%) remains unidentified. Furthermore, this location data uses 40 categories, with the majority of them representing 1% or less of the total shooting incidents. For better clarity, I have collapsed categories with 500 or fewer observations into the "OTHER" category.
+
+```{r original location data collection}
+
+#Transform Time Data
+collapsedIncidents$OCCUR_YEAR = mdy(collapsedIncidents$OCCUR_DATE)
+collapsedIncidents$OCCUR_YEAR = as.factor(year(collapsedIncidents$OCCUR_YEAR))
+
+#Collapse categories that have < 500 entries
+other_categories <- c("ATM", "BANK", "BEAUTY/NAIL SALON", "CANDY STORE", "CHAIN STORE", "CHECK CASH", "CLOTHING BOUTIQUE", "COMMERCIAL BLDG", "DEPT STORE", "DOCTOR/DENTIST", "DRUG STORE", "DRY CLEANER/LAUNDRY", "FACTORY/WAREHOUSE", "FAST FOOD", "GAS STATION", "GYM/FITNESS FACILITY", "HOSPITAL", "HOTEL/MOTEL", "JEWELRY STORE", "LIQUOR STORE", "LOAN COMPANY", "NONE", "PHOTO/COPY STORE", "RESTAURANT/DINER", "SCHOOL", "SHOE STORE", "SMALL MERCHANT", "SOCIAL CLUB/POLICY LOCATI", "STORAGE FACILITY", "STORE UNCLASSIFIED", "SUPERMARKET", "TELECOMM. STORE", "VARIETY STORE", "VIDEO STORE")
+locations <- collapsedIncidents %>% 
+  mutate(LOCATION_DESC = fct_collapse(LOCATION_DESC, OTHER = other_categories))
+
+#Group data
+old_locations <- locations %>%
+  group_by(OCCUR_YEAR, LOCATION_DESC) %>%
+  count()
+
+#Plot Area Graph
+ggplot(old_locations, aes(x = OCCUR_YEAR, y = n, group = LOCATION_DESC, fill = LOCATION_DESC)) +
+  geom_area() +
+    scale_fill_viridis(discrete = TRUE) +
+  theme_classic() +
+  theme(legend.position = "bottom") +
+  labs(fill = "Location",
+       title = "Shooting Locations by Year",
+       x = "Year",
+       y = "Number of Shootings")
+```
+
+**New Data Collection Methods**  
+
+In the year 2022, it appears that a new approach was implemented for the collection of location data. This includes two categories: one to specify whether the shooting took place indoors or outdoors, and the other using only nine general descriptors that could be more easily understood by the data collector when compared to the category descriptors of the other location data.  
+
+
+```{r New Location Data}
+
+#Plot histogram of LOC_OF_OCCUR_DESC
+ggplot(collapsedIncidents, aes(OCCUR_YEAR, fill = LOC_OF_OCCUR_DESC)) +
+  geom_histogram(stat = "count") +
+  scale_fill_viridis(discrete = TRUE) +
+  theme_classic() +
+   theme(legend.position = "bottom") +
+  labs(fill = "Location",
+       title = "Shooting Location: Inside or Outside",
+       x = "Year",
+       y = "Number of Shootings")  
+ 
+#Plot histogram of LOC_CLASSFCN_DESC
+ggplot(collapsedIncidents, aes(OCCUR_YEAR, fill = LOC_CLASSFCTN_DESC)) +
+  geom_histogram(stat = "count") +
+  scale_fill_viridis(discrete = TRUE) +
+  theme_classic() +
+  theme(legend.position = "bottom") +
+  labs(fill = "Location",
+       title = "Shooting Location: Type",
+       x = "Year",
+       y = "Number of Shootings")
+```
+
+###  General Observations  
+
+Unfortunately, location data was not previously collected with the insights of data collection methodology that has since been and continues to be developed. Although the GPS information is accessible in this dataset, the type of location where the incident occurred may have changed multiple times between the incident and today. Consequently, investigating the 15954 unknown data points would require substantial additional time and labor.  
+Gratefully, it appears that in 2022 a new data collection process was implemented, including two new categorization systems that have been utilized successfully when it comes to have complete data. It will be interesting to observe insights that might be derived from such data.
+
+###  Follow-up questions
+
+Based on the limited data provided, it is evident that the majority of shooting incidents in 2022 were categorized as "street" and "outside." Interestingly, these particular descriptors were not included in the previous location data. This leads us to contemplate whether the unspecified values in the prior dataset could potentially be vacant due to the fact that the incidents occurred outside, specifically on the street, rather than within one if the 40 designated locations of the earlier categorization system.
+
+Due to the broad nature of the updated categorization, can we infer that if a shooting occurred in the outdoors and on the street that it did not involve any of the neighboring establishments? If it cannot be inferred might this categorization hide potential insights in the location dataset?
+
+##   Time and Day Shootings are Most Likely to Occur
+
+In addition to location, another relevant variable to consider when analyzing shooting incidents is time- more specifically, the day of the week and time of day in which these incidents occur. As depicted in the graph below, a discernible pattern becomes apparent, indicating a correlation between shooting incidents and the time of day.
+
+```{r Tidy for Datetime}
+
+# Transform data
+collapsedIncidents$OCCUR_DAY = mdy(collapsedIncidents$OCCUR_DATE)
+collapsedIncidents$OCCUR_DAY = wday(collapsedIncidents$OCCUR_DAY, label = TRUE)
+collapsedIncidents$OCCUR_HOUR = hour(hms(as.character(collapsedIncidents$OCCUR_TIME)))
+
+#Group datd
+daytimes <-  collapsedIncidents %>%
+  group_by(OCCUR_DAY, OCCUR_HOUR) %>%
+  count()
+```
+
+
+```{r Heatmap of Day of Week vs Time of Day}
+
+# Plot Heatmap Graph
+ggplot(daytimes, aes(OCCUR_HOUR,OCCUR_DAY, fill = n)) +
+   geom_raster() +
+  scale_fill_viridis("Number of Shootings") +
+   theme_classic() +
+   labs(fill = "Shooting Incidents",
+       title = "Shootings Incidents by Day and Hour",
+       x = "Time of Day (24hr)",
+       y = "Day of the Week")
+```
+
+###  General Observations  
+
+When examining the graph above, a noticeable trend emerges regarding the occurrence of incidents on Friday and Saturday nights, as well as the relatively safer nature of weekday mornings, as well as Sunday mid-mornings, which may correspond with religious observations. Notably, the data indicates that the greatest likelihood of a shooting incident taking place is around 1 am on Sunday mornings (late Saturday night).
+
+###  Follow-up questions
+
+Given that many individuals engage in recreational activities during the weekends, including the use of both legal and illegal substances, it is worth considering whether these behaviors may contribute to the occurrence of shooting incidents during these periods?  
+
+Additionally, what influence does the presence of darkness have on the frequency of shooting incidents? Does the cover of night potentially embolden individuals to engage in shooting behaviors, believing they can evade detection or consequences?  
+
+# Step 4: Biases and Conclusion
+
+###  Data Bias
+
+When considering the various questions that can be asked of a dataset, it is crucial to take into account the potential limitations and biases present. In the specific case of this dataset, pertaining to shooting incidents involving victims, it is important to acknowledge the following absences:
+
+1. *Shooting incidents in which the victim's whereabouts remain unknown* 
+  - We cannot accurately ascertain the precise number of shootings when we only consider those victims who have been located, thus this data represents a minimum count.It is important to consider the potential presence of an unidentified victim pool, which could potentially affect the accurate demographic profile of individuals who fall victim to shootings.
+2. *Shooting incidents that were self inflicted*
+  - This dataset contains no information categorizing suicides or accidental self-inflicted shootings. We cannot assume then that this dataset includes all shootings. 
+3. *Victims of violent acts where firearms were not employed, such as stabbings, assaults, or battery* 
+  - We should be cautious about making generalizations about violence based solely on this dataset, as it only captures information about one specific type. 
+4. *Limited demographic information available encompassing solely age, race, and sex and the absence of other demographic factors, including gender identity, ethnicity, sexual orientation, religion, marital status, educational background, employment status, and stability/transient status*  
+  - It is important to recognize that a comprehensive understanding of victim and perpetrator profiles cannot be achieved by relying on only three broad categories.
+5. *Lack of background on the overall population of each borough and the city overall*
+  - It is important to consider the broader demographic context in order to gain insights into the representation of victims and perpetrators in relation to their respective communities, and ascertain whether they originate from these regions. In order to do any comparison by borough we need to able to look at the incidents per capita.
+
+
+###  Personal Bias  
+
+I have some reservations regarding the reliability of using data for policing purposes. In the case of the NYPD, there exist four datasets consisting of historical information pertaining to police enforcement and criminal activity: Arrests, Summons, Shootings, and Complaint. My concern is that these datasets are often employed to justify increased funding and the procurement of advanced weaponry, rather than being thoroughly analyzed to proactively prevent acts of violence, including through community led efforts.  
+
+In this project, my bias influenced the questions I selected and the conclusions I drew. However, I made a deliberate effort to approach this dataset in a manner that sought to identify areas for enhancement. In the future if I was working with this dataset and there were particular answers being sought, I would corroborate with other data sources and analysts to mitigate any reservations I may have.
+
+##   Conclusion
+In this project, my focus was on investigating the timing and locations of shooting incidents. I conducted an examination of shootings and murders categorized by borough as well as an examination of types of location data being utilized. I also analyzed the time of day and day of the week to determine when shootings were more likely to occur.
+
+Examining shooting incidents by borough highlighted the importance of integrating the broader population demographics of each borough to determine whether a localized pattern exists or if it is better to explore alternative variables in the dataset. This subsequently prompted me to look at location data within the dataset. 
+
+The location variables present in the dataset have the potential to provide valuable insights into incident hotspots (and potentially their underlying causes). However, it mostly highlights the need to follow sound data collection practices and methodology to enable effective analysis. It is commendable that the NYPD has made efforts to implement a new data collection approach, enabling us to leverage this information in the future.
+
+One notable finding in this dataset pertains to the timing of incidents. Specifically, it was observed that a significant proportion of shootings happen during Friday and Saturday from 8pm to 5am. These time periods represent 12% of the entire week, but are disproportionately associated with incidents of gun violence as 30% of shootings occur during this time. Dedicating attention to this temporal aspect could potentially help to mitigate gun violence through targeted preventive measures, especially if there are discernible correlations between violence and particular activities (e.g. substance abuse) occurring during this period.
+
+This dataset serves as an initial reference point focusing on the individuals involved, the timing, and the location of a specific type of violence within a highly populated urban area. However, drawing conclusive insights from this dataset alone is limited, and additional exploration of supplementary details beyond its scope is necessary.
+
+
+
+
+#  Resources Used
+
+-   [NYPD Shooting Incident Data (Historic) - CKAN](https://catalog.data.gov/dataset/nypd-shooting-incident-data-historic)
